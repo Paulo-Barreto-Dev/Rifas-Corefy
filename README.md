@@ -266,9 +266,9 @@ Exemplo:
 ```env
 PORT=3000
 
-DATABASE_URL="postgresql://usuario:senha@localhost:5432/rifas"
+DATABASE_URL=""
 
-JWT_SECRET=sua_chave_secreta
+JWT_SECRET=""
 
 JWT_EXPIRES_IN=7d
 
