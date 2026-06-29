@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Smart Rifas</title>
+    <script>
+      (function () {
+        var theme = localStorage.getItem('smart-rifas-theme')
+        if (
+          theme === 'dark' ||
+          (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        ) {
+          document.documentElement.setAttribute('data-theme', 'dark')
+        }
+      })()
+    </script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navegacao principal">
+        <a class="brand" href="/" aria-label="Smart Rifas">
+          <span class="brand-mark">R</span>
+          <span><strong>Smart Rifas</strong><small>rifas digitais</small></span>
+        </a>
+        <nav class="main-nav">
+          <a class="nav-item active" href="#rifas">Rifas</a>
+          <a class="nav-item" href="#numeros">Números</a>
+          <a class="nav-item" href="#pagamento">Pix</a>
+          <a class="nav-item" href="#painel">Painel</a>
+        </nav>
+        <div class="creator-box">
+          <span class="eyebrow">Criador</span>
+          <strong>Venda guiada</strong>
+          <p>Acompanhe reservas, pagamentos e sorteios em uma única tela.</p>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">Campanha em destaque</span>
+            <h1>Smart Rifas</h1>
+          </div>
+          <div class="topbar-actions">
+            <button
+              class="theme-toggle ghost-button"
+              type="button"
+              id="themeToggle"
+              aria-label="Ativar modo escuro"
+              title="Modo escuro"
+            >
+              <svg class="theme-icon theme-icon-sun" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2" />
+                <path
+                  d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+              <svg class="theme-icon theme-icon-moon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M21 14.5A8.5 8.5 0 0 1 9.5 3 7 7 0 1 0 21 14.5Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+            <button class="ghost-button" type="button" id="authButton">Entrar</button>
+          </div>
+        </header>
+
+        <!-- HeroPage -->
+        <section class="hero" id="rifas" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <div class="status-pill">Sorteio pela Loteria Federal</div>
+            <h2 id="hero-title">Escolha seus números e pague com Pix em poucos segundos.</h2>
+            <p>Uma experiência limpa para comprar cotas, acompanhar o progresso da rifa e receber a confirmação sem confusão.</p>
+            <div class="hero-actions">
+              <a class="primary-button" href="#numeros">Escolher números</a>
+              <a class="text-button" href="#painel">Ver painel</a>
+            </div>
+          </div>
+          <div class="prize-visual" aria-label="Prêmio da rifa">
+            <div class="phone-shape">
+              <span class="camera-dot"></span>
+              <span class="screen-line line-a"></span>
+              <span class="screen-line line-b"></span>
+              <span class="screen-line line-c"></span>
+            </div>
+            <div class="ticket ticket-one"><strong>#247</strong><span>Reservado</span></div>
+            <div class="ticket ticket-two"><strong>#318</strong><span>Livre</span></div>
+          </div>
+        </section>
+
+        <!-- Status -->
+        <section class="stats-grid" aria-label="Resumo da rifa" id="statsGrid">
+          <article><span>Arrecadado</span><strong id="statRaised">R$ 0,00</strong></article>
+          <article><span>Cotas vendidas</span><strong id="statSold">0%</strong></article>
+          <article><span>Valor por número</span><strong id="statPrice">R$ 12,00</strong></article>
+          <article><span>Data do sorteio</span><strong id="statDrawDate">—</strong></article>
+        </section>
+
+        <!-- Escolhas Números -->
+        <section class="workspace" id="numeros" aria-labelledby="numbers-title">
+          <div class="number-panel">
+            <div class="section-heading">
+              <h3 id="numbers-title">Escolha seus números</h3>
+              <div class="segmented-control" role="group" aria-label="Filtrar números">
+                <button type="button" class="selected">Todos</button>
+                <button type="button">Disponíveis</button>
+                <button type="button">Vendidos</button>
+              </div>
+            </div>
+            <div class="number-grid" id="numberGrid" role="list" aria-label="Grade de números"></div>
+          </div>
+
+          <!-- Checkout -->
+          <aside class="checkout-panel" id="pagamento" aria-labelledby="checkout-title">
+            <h3 id="checkout-title">Seu pedido</h3>
+            <div class="selected-list" id="selectedList" aria-live="polite">
+              Nenhum número escolhido
+            </div>
+            <div class="total-row">
+              <span>Total</span>
+              <strong id="totalValue">R$ 0,00</strong>
+            </div>
+            <button class="primary-button full" type="button" id="payButton">
+              Pagar com Pix
+            </button>
+            <div class="pix-box" id="pixBox" hidden>
+              <span class="qr-placeholder" role="img" aria-label="QR Code Pix"></span>
+              <div>
+                <strong>Pix gerado!</strong>
+                <p>Abra seu banco, escaneie o QR Code e confirme o pagamento. Expira em 15 minutos.</p>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <!-- Painel -->
+        <section class="dashboard-band" id="painel" aria-labelledby="painel-title">
+          <div class="section-heading">
+            <h3 id="painel-title">Progresso da rifa</h3>
+          </div>
+          <div class="timeline" role="list" id="dashboardTimeline">
+            <article role="listitem">
+              <span class="timeline-dot done" aria-hidden="true"></span>
+              <strong>Rifa publicada</strong>
+              <p id="timelinePublished">Carregando informações da campanha...</p>
+            </article>
+            <article role="listitem">
+              <span class="timeline-dot current" aria-hidden="true"></span>
+              <strong>Vendas em andamento</strong>
+              <p id="timelineSales">Aguardando dados da rifa.</p>
+            </article>
+            <article role="listitem">
+              <span class="timeline-dot" aria-hidden="true"></span>
+              <strong id="timelineDrawTitle">Sorteio</strong>
+              <p id="timelineDraw">O sorteio será exibido aqui quando houver data definida.</p>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="auth-dialog" id="authDialog" aria-labelledby="auth-title">
+      <form method="dialog" id="authForm" class="auth-form">
+        <header class="auth-header">
+          <div class="auth-header-copy">
+            <span class="eyebrow" id="authEyebrow">Acesso</span>
+            <h3 id="auth-title">Entrar na Smart Rifas</h3>
+            <p class="auth-lead" id="authLead">
+              Entre para reservar números, pagar com Pix e acompanhar suas cotas.
+            </p>
+          </div>
+          <button
+            class="ghost-button auth-close"
+            type="button"
+            id="authCloseButton"
+            aria-label="Fechar"
+          >
+            Fechar
+          </button>
+        </header>
+
+        <div class="auth-fields">
+          <label class="auth-field" id="authNameField" hidden>
+            <span>Nome completo</span>
+            <input type="text" id="authName" autocomplete="name" placeholder="Seu nome" />
+          </label>
+          <label class="auth-field" id="authCpfField" hidden>
+            <span>CPF</span>
+            <input type="text" id="authCpf" autocomplete="off" placeholder="000.000.000-00" />
+          </label>
+          <label class="auth-field">
+            <span>E-mail</span>
+            <input
+              type="email"
+              id="authEmail"
+              required
+              autocomplete="email"
+              placeholder="voce@email.com"
+            />
+          </label>
+          <label class="auth-field">
+            <span>Senha</span>
+            <input
+              type="password"
+              id="authPassword"
+              required
+              autocomplete="current-password"
+              minlength="8"
+              placeholder="Mínimo 8 caracteres"
+            />
+          </label>
+        </div>
+
+        <p id="authError" class="auth-message error" hidden></p>
+
+        <footer class="auth-footer">
+          <button class="primary-button full" type="submit" id="authSubmit">Entrar</button>
+          <p class="auth-switch">
+            <span id="authSwitchLabel">Ainda não tem conta?</span>
+            <button class="auth-link-button" type="button" id="toggleAuthMode">Criar conta</button>
+          </p>
+        </footer>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <div id="pageLoader" class="page-loader" hidden aria-busy="true">Carregando...</div>
+
+    <script src="api.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
