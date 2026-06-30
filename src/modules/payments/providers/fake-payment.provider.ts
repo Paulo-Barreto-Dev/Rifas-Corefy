@@ -8,6 +8,7 @@ import {
 } from './payment-provider.interface'
 
 interface FakePaymentRecord {
+  checkoutSessionId: string
   providerPaymentId: string
   amountCents: number
   description: string
@@ -23,33 +24,34 @@ export class FakePaymentProvider implements PaymentProvider {
   private readonly payments = new Map<string, FakePaymentRecord>()
 
   async createPayment(input: CreatePaymentInput): Promise<ProviderPaymentResult> {
-    const providerPaymentId = uuid().replace(/-/g, '').substring(0, 25).toUpperCase()
+    const checkoutSessionId = uuid().replace(/-/g, '').substring(0, 25).toUpperCase()
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000)
 
     const record: FakePaymentRecord = {
-      providerPaymentId,
+      checkoutSessionId,
+      providerPaymentId: checkoutSessionId,
       amountCents: input.amountCents,
       description: input.description,
       payerEmail: input.payerEmail,
       externalReference: input.externalReference,
       status: 'pending',
-      qrCode: buildFakePixQrCode(providerPaymentId, input.amountCents),
+      qrCode: buildFakePixQrCode(checkoutSessionId, input.amountCents),
       expiresAt,
       forceFail: false,
     }
 
-    this.payments.set(providerPaymentId, record)
+    this.payments.set(checkoutSessionId, record)
 
     return this.toResult(record)
   }
 
-  async getPaymentStatus(providerPaymentId: string): Promise<ProviderPaymentResult> {
-    const record = this.getRecord(providerPaymentId)
+  async getPaymentStatus({ checkoutSessionId }: { checkoutSessionId: string }): Promise<ProviderPaymentResult> {
+    const record = this.getRecord(checkoutSessionId)
     return this.toResult(record)
   }
 
-  async confirmPayment(providerPaymentId: string): Promise<ProviderPaymentResult> {
-    const record = this.getRecord(providerPaymentId)
+  async confirmPayment({ checkoutSessionId }: { checkoutSessionId: string }): Promise<ProviderPaymentResult> {
+    const record = this.getRecord(checkoutSessionId)
 
     if (record.status === 'approved') {
       return this.toResult(record)
@@ -68,14 +70,14 @@ export class FakePaymentProvider implements PaymentProvider {
     return this.toResult(record)
   }
 
-  approveForTest(providerPaymentId: string): ProviderPaymentResult {
-    const record = this.getRecord(providerPaymentId)
+  approveForTest(checkoutSessionId: string): ProviderPaymentResult {
+    const record = this.getRecord(checkoutSessionId)
     record.status = 'approved'
     return this.toResult(record)
   }
 
-  failForTest(providerPaymentId: string): ProviderPaymentResult {
-    const record = this.getRecord(providerPaymentId)
+  failForTest(checkoutSessionId: string): ProviderPaymentResult {
+    const record = this.getRecord(checkoutSessionId)
     record.status = 'failed'
     record.forceFail = true
     return this.toResult(record)
@@ -85,17 +87,18 @@ export class FakePaymentProvider implements PaymentProvider {
     this.payments.clear()
   }
 
-  private getRecord(providerPaymentId: string): FakePaymentRecord {
-    const record = this.payments.get(providerPaymentId)
+  private getRecord(checkoutSessionId: string): FakePaymentRecord {
+    const record = this.payments.get(checkoutSessionId)
     if (!record) throw new NotFoundError('Pagamento do provider')
     return record
   }
 
   private toResult(record: FakePaymentRecord): ProviderPaymentResult {
     return {
+      checkoutSessionId: record.checkoutSessionId,
       providerPaymentId: record.providerPaymentId,
       status: record.status,
-      qrCode: record.qrCode,
+      checkoutUrl: `https://checkout.local/fake/${record.checkoutSessionId}`,
       expiresAt: record.expiresAt,
     }
   }

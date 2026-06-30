@@ -27,7 +27,7 @@
         <nav class="main-nav">
           <a class="nav-item active" href="#rifas">Rifas</a>
           <a class="nav-item" href="#numeros">Números</a>
-          <a class="nav-item" href="#pagamento">Pix</a>
+          <a class="nav-item" href="#pagamento">Checkout</a>
           <a class="nav-item" href="#painel">Painel</a>
         </nav>
         <div class="creator-box">
@@ -79,7 +79,7 @@
         <section class="hero" id="rifas" aria-labelledby="hero-title">
           <div class="hero-copy">
             <div class="status-pill">Sorteio pela Loteria Federal</div>
-            <h2 id="hero-title">Escolha seus números e pague com Pix em poucos segundos.</h2>
+            <h2 id="hero-title">Escolha seus números e finalize o pagamento com Stripe Checkout.</h2>
             <p>Uma experiência limpa para comprar cotas, acompanhar o progresso da rifa e receber a confirmação sem confusão.</p>
             <div class="hero-actions">
               <a class="primary-button" href="#numeros">Escolher números</a>
@@ -131,13 +131,13 @@
               <strong id="totalValue">R$ 0,00</strong>
             </div>
             <button class="primary-button full" type="button" id="payButton">
-              Pagar com Pix
+              Pagar com Stripe
             </button>
             <div class="pix-box" id="pixBox" hidden>
-              <span class="qr-placeholder" role="img" aria-label="QR Code Pix"></span>
+              <span class="qr-placeholder" role="img" aria-label="Stripe Checkout"></span>
               <div>
-                <strong>Pix gerado!</strong>
-                <p>Abra seu banco, escaneie o QR Code e confirme o pagamento. Expira em 15 minutos.</p>
+                <strong>Checkout criado!</strong>
+                <p>Você será redirecionado para o Stripe Checkout. A confirmação acontece apenas via webhook.</p>
               </div>
             </div>
           </aside>
@@ -176,7 +176,7 @@
             <span class="eyebrow" id="authEyebrow">Acesso</span>
             <h3 id="auth-title">Entrar na Smart Rifas</h3>
             <p class="auth-lead" id="authLead">
-              Entre para reservar números, pagar com Pix e acompanhar suas cotas.
+              Entre para reservar números, pagar com Stripe Checkout e acompanhar suas cotas.
             </p>
           </div>
           <button

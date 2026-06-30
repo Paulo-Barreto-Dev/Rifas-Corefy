@@ -29,6 +29,7 @@ app.use(
 
 // Parsing e arquivos publicos
 app.use(compression())
+app.use('/api/v1/payments/webhook', express.raw({ type: 'application/json', limit: '1mb' }))
 app.use(express.json({ limit: '1mb' }))
 app.use(
   express.static(publicPath, {

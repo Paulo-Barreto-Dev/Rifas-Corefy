@@ -9,6 +9,7 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     fileParallelism: false,
+    exclude: ['dist/**', 'node_modules/**'],
   },
   resolve: {
     alias: {

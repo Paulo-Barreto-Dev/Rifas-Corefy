@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import { authenticate, authorize, requireActiveUser } from '@/shared/middlewares/auth.middleware'
 import {
@@ -20,6 +21,18 @@ import { env } from '@/config/env'
 export const router = Router()
 
 const withdrawalService = new WithdrawalService()
+const paymentRateLimit = rateLimit({
+  windowMs: env.PAYMENT_RATE_LIMIT_WINDOW_MS,
+  max: env.PAYMENT_RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'PAYMENT_RATE_LIMITED',
+      message: 'Muitas tentativas de pagamento. Tente novamente em alguns minutos',
+    },
+  },
+})
 
 // ─── Auth / Users ─────────────────────────────────────────────────────────────
 router.post('/auth/register', userController.register)
@@ -51,9 +64,9 @@ router.get ('/tickets/my',                authenticate, requireActiveUser, ticke
 router.post('/raffles/:raffleId/tickets', authenticate, requireActiveUser, ticketController.reserve)
 
 // ─── Payments ─────────────────────────────────────────────────────────────────
-router.post('/payments/tickets/:ticketId/pix',    authenticate, requireActiveUser, paymentController.createPix)
+router.post('/payments/tickets/:ticketId/checkout-session', paymentRateLimit, authenticate, requireActiveUser, paymentController.createCheckoutSession)
 router.get ('/payments/tickets/:ticketId/status', authenticate, requireActiveUser, paymentController.status)
-router.post('/payments/webhook', paymentController.webhook) // público — validar HMAC em produção
+router.post('/payments/webhook', paymentRateLimit, paymentController.webhook)
 
 if (env.NODE_ENV !== 'production') {
   router.post('/payments/:id/approve-test', paymentController.approveTest)

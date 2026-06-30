@@ -158,8 +158,8 @@ const api = {
   },
 
   payments: {
-    createPix(ticketId) {
-      return request(`/payments/tickets/${ticketId}/pix`, { method: 'POST' })
+    createCheckoutSession(ticketId) {
+      return request(`/payments/tickets/${ticketId}/checkout-session`, { method: 'POST' })
     },
 
     status(ticketId) {

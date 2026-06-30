@@ -12,8 +12,11 @@ export interface SaleBreakdown {
 }
 
 export class FinancialTransactionService {
-  async calculateSaleBreakdown(grossCents: number): Promise<SaleBreakdown> {
-    const fee = await prisma.platformFee.findFirst({
+  async calculateSaleBreakdown(
+    grossCents: number,
+    client: Prisma.TransactionClient | typeof prisma = prisma,
+  ): Promise<SaleBreakdown> {
+    const fee = await client.platformFee.findFirst({
       where: { key: DEFAULT_COMMISSION_KEY, isActive: true },
     })
 
@@ -39,7 +42,7 @@ export class FinancialTransactionService {
       amountCents: number
     },
   ): Promise<SaleBreakdown> {
-    const breakdown = await this.calculateSaleBreakdown(params.amountCents)
+    const breakdown = await this.calculateSaleBreakdown(params.amountCents, tx)
 
     await tx.financialTransaction.createMany({
       data: [
@@ -76,6 +79,38 @@ export class FinancialTransactionService {
     await tx.user.update({
       where: { id: params.creatorId },
       data: { balanceCents: { increment: breakdown.creatorEarningCents } },
+    })
+
+    return breakdown
+  }
+
+  async recordRefund(
+    tx: Prisma.TransactionClient,
+    params: {
+      paymentId: string
+      raffleId: string
+      creatorId: string
+      buyerId: string
+      amountCents: number
+    },
+  ): Promise<SaleBreakdown> {
+    const breakdown = await this.calculateSaleBreakdown(params.amountCents, tx)
+
+    await tx.financialTransaction.create({
+      data: {
+        paymentId: params.paymentId,
+        raffleId: params.raffleId,
+        creatorId: params.creatorId,
+        buyerId: params.buyerId,
+        type: FinancialTransactionType.REFUND,
+        amountCents: -breakdown.grossCents,
+        description: 'Estorno de cota',
+      },
+    })
+
+    await tx.user.update({
+      where: { id: params.creatorId },
+      data: { balanceCents: { decrement: breakdown.creatorEarningCents } },
     })
 
     return breakdown

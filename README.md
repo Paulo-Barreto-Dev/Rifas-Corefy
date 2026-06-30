@@ -1,475 +1,249 @@
-# 🎟️ Rifas API
+# Rifas API
 
-Backend da plataforma **Rifas**, desenvolvido para gerenciar todo o ciclo de vida de rifas digitais, desde o cadastro de usuários até a definição do vencedor e controle financeiro da plataforma.
+Backend da plataforma de rifas digitais com arquitetura modular em TypeScript, Express, Prisma e PostgreSQL.
 
-A aplicação foi construída utilizando uma arquitetura modular, priorizando escalabilidade, organização e segurança, permitindo fácil manutenção e evolução do sistema.
+## Visão Geral
+- Gerencia usuários, autenticação, rifas, cotas, pagamentos, financeiro, saques e sorteios.
+- Mantém a regra de negócio principal desacoplada da infraestrutura de pagamento.
+- Usa Stripe Checkout como fluxo principal de pagamento.
+- Confirma pagamentos exclusivamente por webhook assinado.
 
----
-
-# 📑 Sumário
-
-- Sobre 📖
-- Tecnologias 🚀
-- Arquitetura 🏛
-- Estrutura do Projeto 📂
-- Funcionalidades ⚙
-- Requisitos 📦
-- Instalação 🔧
-- Configuração ⚙
-- Banco de Dados 🗄
-- Executando o Projeto ▶
-- Scripts 📜
-- Fluxo da Aplicação 🔄
-- Segurança 🔒
-- Testes 🧪
-- Melhorias Futuras 🚀
-- Licença 📄
-
----
-
-# 📖 Sobre
-
-A Rifas API é responsável por toda a regra de negócio da plataforma de rifas online.
-
-Entre suas responsabilidades estão:
-
-- Gerenciamento de usuários
-- Autenticação
-- Controle de permissões
-- Criação de rifas
-- Compra de números
-- Processamento de pagamentos
-- Controle financeiro
-- Sorteios
-- Auditoria das operações
-
-Toda a API foi desenvolvida utilizando TypeScript e Express, com persistência em PostgreSQL através do Prisma ORM.
-
----
-
-# 🚀 Tecnologias
-
-## Backend
-
-- Node.js
+## Stack
+- Node.js 20+
 - TypeScript
 - Express
-
-## Banco de Dados
-
-- PostgreSQL
 - Prisma ORM
-
-## Autenticação
-
-- JWT (JSON Web Token)
-- Bcrypt
-
-## Validação
-
-- Zod
-
-## Segurança
-
-- Helmet
-- CORS
-- Rate Limit
-
-## Logs
-
-- Winston
-
-## Testes
-
+- PostgreSQL
 - Vitest
+- Docker / Docker Compose
+- Stripe SDK oficial
 
-## Outras bibliotecas
-
-- dotenv
-- compression
-- express-async-errors
-
----
-
-# 🏛 Arquitetura
-
-O projeto segue uma arquitetura modular, separando cada domínio de negócio em módulos independentes.
-
-Cada módulo possui suas próprias responsabilidades, facilitando manutenção e evolução da aplicação.
-
-Exemplo:
-
-```
-Usuários
-│
-├── Controller
-├── Service
-├── Repository
-├── DTO
-├── Validation
-└── Routes
+## Estrutura
+```text
+src/
+  config/
+  modules/
+    admin/
+    draws/
+    financial/
+    payments/
+    raffles/
+    tickets/
+    users/
+  shared/
+  app.ts
+  routes.ts
+  server.ts
+prisma/
+  migrations/
+  schema.prisma
+public/
 ```
 
-Esse padrão reduz acoplamento e facilita reutilização de código.
+## Arquitetura de Pagamentos
+- `PaymentService` orquestra o fluxo de negócio do pagamento.
+- `PaymentProvider` define a interface comum para providers.
+- `StripePaymentProvider` adapta o Stripe ao contrato atual da aplicação.
+- `StripeService` encapsula chamadas da SDK oficial.
+- `stripe.config.ts` centraliza chaves e configuração do Stripe.
 
----
+## Fluxo Atual de Pagamento
+1. O comprador reserva uma cota em `POST /api/v1/raffles/:raffleId/tickets`.
+2. O backend cria uma Checkout Session em `POST /api/v1/payments/tickets/:ticketId/checkout-session`.
+3. A API retorna a URL hospedada do Stripe Checkout.
+4. O frontend redireciona o usuário para o Stripe Checkout.
+5. O Stripe envia o evento para `POST /api/v1/payments/webhook`.
+6. O backend valida a assinatura com `STRIPE_WEBHOOK_SECRET`.
+7. Apenas após o webhook:
+   - o pagamento é marcado como `CONFIRMED`;
+   - a cota é marcada como `PAID`;
+   - a rifa tem `soldTicketsCount` incrementado;
+   - as transações financeiras são registradas;
+   - o saldo do criador é atualizado.
 
-# 📂 Estrutura do Projeto
+## Eventos Tratados
+- `checkout.session.completed`
+- `payment_intent.succeeded`
+- `payment_intent.payment_failed`
 
-```
-src
-│
-├── config
-│
-├── database
-│
-├── middlewares
-│
-├── modules
-│   │
-│   ├── auth
-│   ├── users
-│   ├── raffles
-│   ├── tickets
-│   ├── payments
-│   ├── withdrawals
-│   ├── transactions
-│   ├── audit
-│   └── ...
-│
-├── routes
-│
-├── shared
-│
-├── utils
-│
-└── server.ts
-```
+## Idempotência de Webhook
+- Cada evento recebido do Stripe é persistido em `PaymentWebhookEvent`.
+- Eventos duplicados são ignorados sem reprocessar o pagamento.
+- A finalização do pagamento também é idempotente no nível do domínio.
 
----
-
-# ⚙ Funcionalidades
-
-## Usuários
-
-- Cadastro
-- Login
-- Atualização de perfil
-- Alteração de senha
-- Bloqueio de usuários
-- Controle de permissões
-- Verificação de criadores
-
----
-
-## Rifas
-
-- Criar rifa
-- Editar rifa
-- Publicar
-- Pausar
-- Encerrar
-- Cancelar
-- Consultar rifas
-- Filtrar rifas
-
----
-
-## Bilhetes
-
-- Reserva de números
-- Compra de bilhetes
-- Cancelamento
-- Disponibilidade de números
-
----
-
-## Pagamentos
-
-- Integração via PIX
-- Confirmação automática
-- Controle de pagamentos
-- Histórico
-
----
-
-## Sorteios
-
-- Definição do vencedor
-- Encerramento automático
-- Registro dos resultados
-
----
-
-## Financeiro
-
-- Controle de saldo
-- Taxa da plataforma
-- Solicitação de saque
-- Histórico financeiro
-
----
-
-## Auditoria
-
-Registro das principais ações realizadas pelos usuários e administradores.
-
----
-
-# 📦 Requisitos
-
-- Node.js 20+
-- PostgreSQL 16+
-- npm
-- Git
-
----
-
-# 🔧 Instalação
-
-Clone o projeto
-
-```bash
-git clone https://github.com/SEU-USUARIO/rifas-api.git
-```
-
-Entre na pasta
-
-```bash
-cd rifas-api
-```
-
-Instale as dependências
-
-```bash
-npm install
-```
-
----
-
-# ⚙ Configuração
-
-Crie o arquivo
-
-```
-.env
-```
-
-Baseado no arquivo
-
-```
-.env.example
-```
-
-Exemplo:
+## Variáveis de Ambiente
+Use o arquivo `.env.example` como base.
 
 ```env
+# Banco
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/rifas"
+
+# Auth
+JWT_SECRET="uma_chave_com_pelo_menos_32_caracteres"
+JWT_EXPIRES_IN="7d"
+
+# Servidor
 PORT=3000
-
-DATABASE_URL="postgresql://usuario:senha@localhost:5432/rifas"
-
-JWT_SECRET=sua_chave_secreta
-
-JWT_EXPIRES_IN=7d
-
 NODE_ENV=development
+
+# Segurança
+BCRYPT_ROUNDS=10
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX=100
+
+# Pagamentos
+PAYMENT_PROVIDER="stripe"
+STRIPE_SECRET_KEY="sk_test_..."
+STRIPE_WEBHOOK_SECRET="whsec_..."
+STRIPE_PUBLISHABLE_KEY="pk_test_..."
+
+# Opcional
+REDIS_URL=""
+LOTERIA_API_URL="https://servicebus2.caixa.gov.br/portaldeloterias/api"
 ```
 
----
-
-# 🗄 Banco de Dados
-
-Gerar o Prisma Client
-
+## Instalação Local
 ```bash
+npm install
 npx prisma generate
 ```
 
-Executar migrations
-
+## Banco de Dados
 ```bash
-npx prisma migrate dev
+npx prisma migrate dev --schema prisma/schema.prisma
+npx prisma studio --schema prisma/schema.prisma
 ```
 
-Abrir Prisma Studio
-
-```bash
-npx prisma studio
-```
-
----
-
-# ▶ Executando
-
-Modo desenvolvimento
-
+## Executando Sem Docker
 ```bash
 npm run dev
 ```
 
-Build
+Build de produção:
 
 ```bash
 npm run build
-```
-
-Produção
-
-```bash
 npm start
 ```
 
----
+## Executando Com Docker
+1. Crie o arquivo `.env` com as variáveis obrigatórias.
+2. Suba os serviços:
 
-# 📜 Scripts
+```bash
+docker compose up --build
+```
 
+Observações:
+- O `Dockerfile` continua compatível com a instalação padrão por `npm install`.
+- O `docker-compose.yml` continua usando `npm run dev`.
+- Nenhuma configuração manual extra é necessária além do `.env`.
+
+## Rotas de Pagamento
+- `POST /api/v1/payments/tickets/:ticketId/checkout-session`
+- `GET /api/v1/payments/tickets/:ticketId/status`
+- `POST /api/v1/payments/webhook`
+
+## Configurando Webhooks do Stripe
+
+### Dashboard Stripe
+Cadastre um endpoint apontando para:
+
+```text
+http://localhost:3000/api/v1/payments/webhook
+```
+
+Em ambiente remoto, troque `localhost` pela URL pública da API.
+
+### Eventos obrigatórios
+Selecione:
+- `checkout.session.completed`
+- `payment_intent.succeeded`
+- `payment_intent.payment_failed`
+
+### Chave do webhook
+Copie o segredo do endpoint gerado pelo Stripe e preencha:
+
+```env
+STRIPE_WEBHOOK_SECRET="whsec_..."
+```
+
+## Testando Localmente
+1. Inicie a aplicação.
+2. Faça login.
+3. Reserve uma cota.
+4. Crie a Checkout Session pela API ou pela interface demo.
+5. Acesse a URL retornada pelo Stripe.
+6. Finalize o pagamento com cartão de teste.
+7. Confirme no banco que:
+   - `Payment.status = CONFIRMED`
+   - `Ticket.status = PAID`
+   - `Raffle.soldTicketsCount` foi incrementado
+   - foram criadas 3 linhas em `FinancialTransaction`
+
+Cartão de teste para sucesso:
+
+```text
+4242 4242 4242 4242
+```
+
+Cartão de teste para falha:
+
+```text
+4000 0000 0000 0002
+```
+
+## Testando Com Stripe CLI
+1. Instale a Stripe CLI.
+2. Faça login:
+
+```bash
+stripe login
+```
+
+3. Encaminhe os webhooks para a API local:
+
+```bash
+stripe listen --forward-to localhost:3000/api/v1/payments/webhook
+```
+
+4. Copie o `Signing secret` exibido pela CLI e atualize:
+
+```env
+STRIPE_WEBHOOK_SECRET="whsec_..."
+```
+
+5. Gere uma compra real em modo teste pela aplicação e finalize o checkout.
+
+Observação:
+- Para validar a integração completa do projeto, o melhor caminho é criar a Checkout Session pela própria API e concluir o checkout hospedado.
+- `stripe trigger` é útil para testes isolados de assinatura e entrega do webhook, mas não substitui o fluxo completo com sessão criada pelo sistema.
+
+## Scripts
 | Script | Descrição |
-|---------|-----------|
-| npm run dev | Inicia em desenvolvimento |
-| npm run build | Compila TypeScript |
-| npm start | Executa produção |
-| npm run test | Executa testes |
-| npm run lint | Executa lint |
-| prisma generate | Gera Prisma Client |
-| prisma migrate dev | Executa migrations |
-| prisma studio | Interface gráfica do banco |
+| --- | --- |
+| `npm run dev` | Inicia a API em desenvolvimento |
+| `npm run build` | Compila TypeScript e ajusta aliases |
+| `npm start` | Executa a build gerada |
+| `npm test` | Executa os testes |
+| `npm run test:watch` | Executa testes em watch mode |
+| `npm run db:migrate` | Executa migrations do Prisma |
+| `npm run db:generate` | Gera o Prisma Client |
+| `npm run db:studio` | Abre o Prisma Studio |
 
----
+## Segurança
+- JWT para autenticação
+- Bcrypt para hashing de senha
+- Zod para validação
+- Helmet, CORS e rate limiting
+- Webhook com verificação de assinatura
+- Erros padronizados e logs estruturados
 
-# 🔄 Fluxo Principal
+## Observações Importantes
+- A confirmação do pagamento não depende do retorno do frontend.
+- O webhook é a única fonte de verdade para aprovação e falha.
+- O modelo de pagamento foi tornado genérico para suportar Stripe sem manter campos acoplados a PIX/Mercado Pago.
+- O fluxo de saque continua separado do gateway de cobrança e permanece manual no backoffice.
 
-```
-Usuário
-
-↓
-
-Cadastro
-
-↓
-
-Login
-
-↓
-
-Criar Rifa
-
-↓
-
-Publicação
-
-↓
-
-Compra de Bilhetes
-
-↓
-
-Pagamento PIX
-
-↓
-
-Confirmação
-
-↓
-
-Sorteio
-
-↓
-
-Definição do Vencedor
-
-↓
-
-Transferência Financeira
-
-↓
-
-Solicitação de Saque
-```
-
----
-
-# 🔒 Segurança
-
-A API implementa diversas medidas de segurança:
-
-- JWT Authentication
-- Senhas criptografadas com Bcrypt
-- Helmet
-- CORS
-- Rate Limiter
-- Validação de dados com Zod
-- Variáveis de ambiente
-- Tratamento global de erros
-
----
-
-# 🧪 Testes
-
-Executar testes
-
-```bash
-npm test
-```
-
-Modo watch
-
-```bash
-npm run test:watch
-```
-
----
-
-# 📈 Escalabilidade
-
-O projeto foi estruturado para facilitar futuras implementações como:
-
-- Integração com Mercado Pago
-- Integração com Stripe
-- Webhooks
-- Notificações
-- Filas (BullMQ)
-- Redis
-- Cache
-- Microsserviços
-- Docker
-- Kubernetes
-
----
-
-# 🤝 Contribuição
-
-1. Faça um Fork
-2. Crie uma branch
-
-```
-feature/minha-feature
-```
-
-3. Commit
-
-```
-git commit -m "feat: minha feature"
-```
-
-4. Push
-
-```
-git push origin feature/minha-feature
-```
-
-5. Abra um Pull Request
-
----
-
-# 📄 Licença
-
-Este projeto é privado e destinado ao uso interno da plataforma SmartRifas.
-
----
-
-# 👨‍💻 Desenvolvedor
-
-Desenvolvido utilizando boas práticas de desenvolvimento backend, arquitetura modular e princípios de código limpo.
-Dev: Paulo Barreto
-
----
+## Licença
+Projeto privado para uso interno.

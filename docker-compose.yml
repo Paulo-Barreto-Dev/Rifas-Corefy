@@ -1,0 +1,119 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: rifas-api-dev
+    command: sh -c "npm run db:deploy && npm run dev"
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rifas}:${POSTGRES_PASSWORD:-rifas}@postgres:5432/${POSTGRES_DB:-rifas}?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-local-development-32chars}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-fake}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
+      PAYMENT_RATE_LIMIT_WINDOW_MS: ${PAYMENT_RATE_LIMIT_WINDOW_MS:-300000}
+      PAYMENT_RATE_LIMIT_MAX: ${PAYMENT_RATE_LIMIT_MAX:-20}
+      LOTERIA_API_URL: ${LOTERIA_API_URL:-https://servicebus2.caixa.gov.br/portaldeloterias/api}
+    volumes:
+      - .:/app
+      - api_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  api-prod:
+    profiles: ["production"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: rifas-api-prod
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rifas}:${POSTGRES_PASSWORD:-rifas}@postgres:5432/${POSTGRES_DB:-rifas}?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-stripe}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-900000}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
+      PAYMENT_RATE_LIMIT_WINDOW_MS: ${PAYMENT_RATE_LIMIT_WINDOW_MS:-300000}
+      PAYMENT_RATE_LIMIT_MAX: ${PAYMENT_RATE_LIMIT_MAX:-20}
+      LOTERIA_API_URL: ${LOTERIA_API_URL:-https://servicebus2.caixa.gov.br/portaldeloterias/api}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: rifas-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rifas}
+      POSTGRES_USER: ${POSTGRES_USER:-rifas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rifas}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: rifas-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
+volumes:
+  postgres_data:
+  redis_data:
+  api_node_modules:

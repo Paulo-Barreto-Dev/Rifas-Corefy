@@ -158,8 +158,8 @@ function setAuthMode(mode) {
   authTitle.textContent = isRegister ? 'Criar sua conta' : 'Entrar na Smart Rifas'
   authEyebrow.textContent = isRegister ? 'Cadastro' : 'Acesso'
   authLead.textContent = isRegister
-    ? 'Cadastre-se para comprar cotas, pagar com Pix e acompanhar seus números.'
-    : 'Entre para reservar números, pagar com Pix e acompanhar suas cotas.'
+    ? 'Cadastre-se para comprar cotas, pagar com Stripe Checkout e acompanhar seus números.'
+    : 'Entre para reservar números, pagar com Stripe Checkout e acompanhar suas cotas.'
   authSwitchLabel.textContent = isRegister ? 'Já tem conta?' : 'Ainda não tem conta?'
   authError.hidden = true
   authPassword.autocomplete = isRegister ? 'new-password' : 'current-password'
@@ -434,29 +434,56 @@ async function handlePay() {
     state.pixPayments = []
 
     for (const ticket of reservation.tickets) {
-      const pix = await api.payments.createPix(ticket.id)
-      state.pixPayments.push(pix)
+      const checkoutSession = await api.payments.createCheckoutSession(ticket.id)
+      state.pixPayments.push(checkoutSession)
     }
 
-    const firstPix = state.pixPayments[0]
+    const firstSession = state.pixPayments[0]
+    if (!firstSession?.checkoutUrl) {
+      throw new Error('O checkout do Stripe não retornou uma URL válida')
+    }
+
+    if (state.pixPayments.length === 1) {
+      showToast('Redirecionando para o Stripe Checkout', 'success')
+      window.location.assign(firstSession.checkoutUrl)
+      return
+    }
+
     pixBox.hidden = false
-    pixBox.querySelector('strong').textContent =
-      state.pixPayments.length > 1 ? 'Primeiro Pix gerado!' : 'Pix gerado!'
-    pixBox.querySelector('p').textContent =
-      state.pixPayments.length > 1
-        ? `${state.pixPayments.length} cobrancas Pix criadas. Escaneie a primeira. Expira em 15 minutos.`
-        : 'Abra seu banco, escaneie o QR Code e confirme o pagamento. Expira em 15 minutos.'
+    pixBox.querySelector('strong').textContent = 'Sessões Stripe criadas'
+    pixBox.querySelector('p').innerHTML = `${state.pixPayments.length} sessões foram criadas. Finalize cada pagamento no Stripe Checkout:<br>${state.pixPayments
+      .map(
+        (session, index) =>
+          `<a href="${session.checkoutUrl}" target="_blank" rel="noopener">Abrir checkout ${index + 1}</a>`,
+      )
+      .join('<br>')}`
 
-    const qrPlaceholder = pixBox.querySelector('.qr-placeholder')
-    qrPlaceholder.title = firstPix.pixQrCode
+    showToast('Sessões de checkout criadas com sucesso', 'success')
+  })
+}
 
+async function handleCheckoutReturn() {
+  const params = new URLSearchParams(window.location.search)
+  const checkoutState = params.get('checkout')
+  const ticketId = params.get('ticketId')
+
+  if (!checkoutState) return
+
+  if (checkoutState === 'cancelled') {
+    showToast('Checkout cancelado. Sua reserva permanece ativa até expirar.', 'info')
+  }
+
+  if (checkoutState === 'success' && ticketId && api.isAuthenticated()) {
+    showToast('Pagamento recebido. Aguardando confirmação do Stripe...', 'info')
+    await pollPaymentStatus(ticketId)
     stopPaymentPolling()
     state.paymentPollId = window.setInterval(() => {
-      pollPaymentStatus(firstPix.payment.ticketId)
-    }, 5000)
+      pollPaymentStatus(ticketId)
+    }, 3000)
+  }
 
-    showToast('Reserva e Pix criados com sucesso', 'success')
-  })
+  const cleanUrl = `${window.location.pathname}${window.location.hash || ''}`
+  window.history.replaceState({}, document.title, cleanUrl)
 }
 
 async function handleAuthSubmit(event) {
@@ -695,6 +722,7 @@ async function bootstrap() {
     await loadSession()
     await loadFeaturedRaffle()
     renderCreatorPanel()
+    await handleCheckoutReturn()
   } catch (error) {
     showToast(error.message || 'Erro ao carregar dados iniciais', 'error')
     renderNumberGrid()

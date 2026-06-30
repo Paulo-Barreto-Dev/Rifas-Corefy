@@ -153,26 +153,45 @@ model Ticket {
 }
 
 model Payment {
-  id            String        @id @default(uuid())
-  ticketId      String        @unique
-  userId        String
-  amountCents   Int
-  pixTxId       String        @unique
-  pixQrCode     String
-  pixExpiration DateTime?
-  confirmedAt   DateTime?
-  status        PaymentStatus @default(PENDING)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id                        String               @id @default(uuid())
+  ticketId                  String               @unique
+  userId                    String
+  amountCents               Int
+  provider                  String
+  providerCheckoutSessionId String               @unique
+  providerPaymentId         String?              @unique
+  providerCheckoutUrl       String?
+  providerExpiresAt         DateTime?
+  confirmedAt               DateTime?
+  status                    PaymentStatus        @default(PENDING)
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
 
   ticket                Ticket                 @relation(fields: [ticketId], references: [id])
   user                  User                   @relation(fields: [userId], references: [id])
   financialTransactions FinancialTransaction[]
   auditLogs             PaymentAuditLog[]
+  webhookEvents         PaymentWebhookEvent[]
 
   @@index([userId])
   @@index([status])
   @@index([confirmedAt])
+}
+
+model PaymentWebhookEvent {
+  id              String   @id @default(uuid())
+  provider        String
+  providerEventId String   @unique
+  eventType       String
+  paymentId       String?
+  payload         Json?
+  processedAt     DateTime @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@index([provider, eventType])
+  @@index([processedAt])
 }
 
 model FinancialTransaction {
@@ -282,4 +301,3 @@ model Draw {
   raffle       Raffle @relation(fields: [raffleId], references: [id])
   winnerTicket Ticket @relation(fields: [winnerTicketId], references: [id])
 }
-

@@ -4,6 +4,7 @@ import { prisma } from '@/shared/infra/prisma'
 import { resetPaymentProviderForTests } from '@/modules/payments/providers/payment-provider.factory'
 
 export async function resetDatabase() {
+  await prisma.paymentWebhookEvent.deleteMany()
   await prisma.paymentAuditLog.deleteMany()
   await prisma.financialTransaction.deleteMany()
   await prisma.payment.deleteMany()

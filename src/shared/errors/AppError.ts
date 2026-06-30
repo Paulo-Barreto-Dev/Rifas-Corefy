@@ -39,3 +39,9 @@ export class PaymentError extends AppError {
     super(message, 402, 'PAYMENT_ERROR')
   }
 }
+
+export class ValidationError extends AppError {
+  constructor(message: 'Nao Encontrado') {
+    super(message, 400, 'VALIDATION_ERROR')
+  }
+}

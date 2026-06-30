@@ -228,7 +228,7 @@ export class AdminRaffleService {
    *
    * Refund logic here marks Payment records as REFUNDED and Ticket records as
    * CANCELLED. The actual money transfer back to buyers must be triggered via
-   * the payment gateway (Pagar.me / Mercado Pago) in a follow-up step or
+   * the payment gateway (Stripe) in a follow-up step or
    * webhook — this method only updates platform state.
    */
   async cancelRaffle(

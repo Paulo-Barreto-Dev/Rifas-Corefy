@@ -5,17 +5,25 @@ export interface CreatePaymentInput {
   description: string
   payerEmail: string
   externalReference: string
+  successUrl: string
+  cancelUrl: string
+}
+
+export interface ProviderPaymentLookup {
+  checkoutSessionId: string
+  providerPaymentId?: string | null
 }
 
 export interface ProviderPaymentResult {
-  providerPaymentId: string
+  checkoutSessionId: string
+  providerPaymentId?: string | null
   status: ProviderPaymentStatus
-  qrCode?: string
+  checkoutUrl?: string
   expiresAt?: Date
 }
 
 export interface PaymentProvider {
   createPayment(input: CreatePaymentInput): Promise<ProviderPaymentResult>
-  getPaymentStatus(providerPaymentId: string): Promise<ProviderPaymentResult>
-  confirmPayment(providerPaymentId: string): Promise<ProviderPaymentResult>
+  getPaymentStatus(input: ProviderPaymentLookup): Promise<ProviderPaymentResult>
+  confirmPayment(input: ProviderPaymentLookup): Promise<ProviderPaymentResult>
 }

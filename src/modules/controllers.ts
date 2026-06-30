@@ -6,6 +6,7 @@ import { RaffleService } from '@/modules/raffles/services/raffle.service'
 import { TicketService } from '@/modules/tickets/services/ticket.service'
 import { PaymentService } from '@/modules/payments/services/payment.service'
 import { DrawService } from '@/modules/draws/services/draw.service'
+import { AppError } from '@/shared/errors/AppError'
 
 const userService = new UserService()
 const raffleService = new RaffleService()
@@ -146,8 +147,9 @@ export const ticketController = {
 }
 
 export const paymentController = {
-  async createPix(req: Request, res: Response) {
-    const result = await paymentService.createPixPayment(req.params.ticketId, req.user!.sub)
+  async createCheckoutSession(req: Request, res: Response) {
+    const baseUrl = `${req.protocol}://${req.get('host')}`
+    const result = await paymentService.createCheckoutSession(req.params.ticketId, req.user!.sub, baseUrl)
     res.status(201).json(result)
   },
 
@@ -157,8 +159,15 @@ export const paymentController = {
   },
 
   async webhook(req: Request, res: Response) {
-    const { pixTxId } = z.object({ pixTxId: z.string().min(1) }).parse(req.body)
-    const result = await paymentService.confirmPayment(pixTxId)
+    const signature = Array.isArray(req.headers['stripe-signature'])
+      ? req.headers['stripe-signature'][0]
+      : req.headers['stripe-signature']
+
+    if (!Buffer.isBuffer(req.body)) {
+      throw new AppError('Payload do webhook invalido', 400, 'INVALID_WEBHOOK_PAYLOAD')
+    }
+
+    const result = await paymentService.handleWebhook(req.body, signature)
     res.json(result)
   },
 
