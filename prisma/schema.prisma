@@ -45,15 +45,18 @@ enum TicketStatus {
 
 enum PaymentStatus {
   PENDING
-  CONFIRMED
+  APPROVED
   FAILED
+  CANCELLED
+  EXPIRED
   REFUNDED
 }
 
 enum FinancialTransactionType {
-  SALE
-  PLATFORM_FEE
-  CREATOR_EARNING
+  PAYMENT_RECEIVED
+  COMMISSION
+  PRIZE
+  WITHDRAWAL
   REFUND
 }
 
@@ -92,8 +95,7 @@ model User {
   reviewedWithdrawals WithdrawalRequest[] @relation("WithdrawalReviewer")
   platformFees           PlatformFee[]
   auditLogs              AuditLog[]
-  creatorTransactions    FinancialTransaction[] @relation("CreatorTransactions")
-  buyerTransactions      FinancialTransaction[] @relation("BuyerTransactions")
+  financialTransactions  FinancialTransaction[]
 
   @@index([role, createdAt])
   @@index([status])
@@ -196,26 +198,26 @@ model PaymentWebhookEvent {
 
 model FinancialTransaction {
   id          String                   @id @default(uuid())
-  paymentId   String
-  raffleId    String
-  creatorId   String
-  buyerId     String
+  userId      String
   type        FinancialTransactionType
   amountCents Int
+  referenceId String
   description String?
+  paymentId   String?
+  raffleId    String?
   createdAt   DateTime                 @default(now())
 
-  payment Payment @relation(fields: [paymentId], references: [id])
-  raffle  Raffle  @relation(fields: [raffleId], references: [id])
-  creator User    @relation("CreatorTransactions", fields: [creatorId], references: [id])
-  buyer   User    @relation("BuyerTransactions", fields: [buyerId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+  payment Payment? @relation(fields: [paymentId], references: [id])
+  raffle  Raffle?  @relation(fields: [raffleId], references: [id])
 
+  @@index([userId])
+  @@index([referenceId])
   @@index([paymentId])
   @@index([raffleId])
-  @@index([creatorId])
-  @@index([buyerId])
   @@index([type])
   @@index([createdAt])
+  @@unique([userId, type, referenceId])
 }
 
 model PaymentAuditLog {

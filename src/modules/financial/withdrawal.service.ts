@@ -1,8 +1,11 @@
 import { ConflictError, NotFoundError } from '@/shared/errors/AppError'
+import { FinancialTransactionService } from '@/modules/financial/services/financial-transaction.service'
 import { prisma } from '@/shared/infra/prisma'
 
 const MIN_WITHDRAWAL_CENTS = 1_000  // R$ 10,00
 const MAX_WITHDRAWAL_CENTS = 500_000_00 // R$ 500.000,00
+
+const financialTransactionService = new FinancialTransactionService()
 
 export class WithdrawalService {
   /**
@@ -12,7 +15,7 @@ export class WithdrawalService {
   async requestWithdrawal(userId: string, amountCents: number, pixKey: string) {
     const user = await prisma.user.findUnique({
       where:  { id: userId },
-      select: { id: true, balanceCents: true, pixKey: true },
+      select: { id: true, pixKey: true },
     })
     if (!user) throw new NotFoundError('Usuário')
 
@@ -26,9 +29,11 @@ export class WithdrawalService {
         `Valor máximo para saque é R$ ${(MAX_WITHDRAWAL_CENTS / 100).toFixed(2)}`,
       )
     }
-    if (user.balanceCents < amountCents) {
+
+    const availableBalance = await financialTransactionService.getBalance(userId)
+    if (availableBalance < amountCents) {
       throw new ConflictError(
-        `Saldo insuficiente. Disponível: R$ ${(user.balanceCents / 100).toFixed(2)}`,
+        `Saldo insuficiente. Disponível: R$ ${(availableBalance / 100).toFixed(2)}`,
       )
     }
 

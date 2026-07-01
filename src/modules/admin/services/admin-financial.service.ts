@@ -1,10 +1,12 @@
 import { PaymentStatus, WithdrawalStatus } from '@prisma/client'
 import { ConflictError, NotFoundError } from '@/shared/errors/AppError'
+import { FinancialTransactionService } from '@/modules/financial/services/financial-transaction.service'
 import { prisma } from '@/shared/infra/prisma'
 import { logger } from '@/shared/utils/logger'
 import { AuditService } from './audit.service'
 
 const auditService = new AuditService()
+const financialTransactionService = new FinancialTransactionService()
 
 export interface ListPaymentsFilters {
   status?:  PaymentStatus
@@ -98,7 +100,7 @@ export class AdminFinancialService {
   /**
    * Approves or rejects a pending withdrawal request.
    *
-   * On APPROVED: deducts amountCents from the user's balanceCents.
+   * On APPROVED: records a WITHDRAWAL ledger entry and syncs cached balance.
    * The actual Pix transfer to the user must be triggered via the payment
    * gateway — this method only updates platform state and balance.
    */
@@ -112,7 +114,7 @@ export class AdminFinancialService {
   ) {
     const withdrawal = await prisma.withdrawalRequest.findUnique({
       where:   { id: withdrawalId },
-      include: { user: { select: { id: true, name: true, balanceCents: true } } },
+      include: { user: { select: { id: true, name: true } } },
     })
     if (!withdrawal) throw new NotFoundError('Solicitação de saque')
 
@@ -122,10 +124,13 @@ export class AdminFinancialService {
       )
     }
 
-    if (decision === 'APPROVED' && withdrawal.user.balanceCents < withdrawal.amountCents) {
-      throw new ConflictError(
-        `Saldo insuficiente: usuário tem ${withdrawal.user.balanceCents} centavos, saque requer ${withdrawal.amountCents}`,
-      )
+    if (decision === 'APPROVED') {
+      const availableBalance = await financialTransactionService.getBalance(withdrawal.userId)
+      if (availableBalance < withdrawal.amountCents) {
+        throw new ConflictError(
+          `Saldo insuficiente: usuário tem ${availableBalance} centavos, saque requer ${withdrawal.amountCents}`,
+        )
+      }
     }
 
     const before  = { status: withdrawal.status }
@@ -147,9 +152,10 @@ export class AdminFinancialService {
       })
 
       if (decision === 'APPROVED') {
-        await tx.user.update({
-          where: { id: withdrawal.userId },
-          data:  { balanceCents: { decrement: withdrawal.amountCents } },
+        await financialTransactionService.recordWithdrawal(tx, {
+          userId: withdrawal.userId,
+          withdrawalId: withdrawal.id,
+          amountCents: withdrawal.amountCents,
         })
       }
 
@@ -287,7 +293,7 @@ export class AdminFinancialService {
       activeFees,
     ] = await Promise.all([
       prisma.payment.aggregate({
-        where: { status: PaymentStatus.CONFIRMED, confirmedAt: { gte: from, lte: to } },
+        where: { status: PaymentStatus.APPROVED, confirmedAt: { gte: from, lte: to } },
         _sum:   { amountCents: true },
         _count: true,
       }),
@@ -325,7 +331,7 @@ export class AdminFinancialService {
           tickets: {
             some: {
               payment: {
-                status:      PaymentStatus.CONFIRMED,
+                status:      PaymentStatus.APPROVED,
                 confirmedAt: { gte: from, lte: to },
               },
             },

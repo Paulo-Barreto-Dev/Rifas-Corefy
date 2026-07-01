@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { PaymentService } from '@/modules/payments/services/payment.service'
 import { TicketService } from '@/modules/tickets/services/ticket.service'
 import { ReservationExpirationService } from '@/modules/financial/services/reservation-expiration.service'
+import { FinancialTransactionService } from '@/modules/financial/services/financial-transaction.service'
 import { FakePaymentProvider } from '@/modules/payments/providers/fake-payment.provider'
 import { AppError } from '@/shared/errors/AppError'
 import { env } from '@/config/env'
@@ -16,6 +17,7 @@ import {
 
 describe('Payment flow', () => {
   const ticketService = new TicketService()
+  const financialTransactionService = new FinancialTransactionService()
   let fakeProvider: FakePaymentProvider
   let paymentService: PaymentService
 
@@ -33,13 +35,18 @@ describe('Payment flow', () => {
     const paymentAfter = await prisma.payment.findUnique({ where: { id: created.payment.id } })
 
     expect(created.payment.status).toBe('PENDING')
+    expect(created.qrCode).toBeTruthy()
     expect(paymentAfter?.status).toBe('PENDING')
     expect(ticketAfter?.status).toBe('RESERVED')
     expect(ticketAfter?.reservedUntil).toBeTruthy()
   })
 
-  it('aprova pagamento e marca ticket como PAID', async () => {
-    const { created, raffle, ticket } = await createPendingPaymentFixture(paymentService, ticketService, 1)
+  it('aprova pagamento fake, confirma ticket e cria transacoes financeiras', async () => {
+    const { created, raffle, ticket, creator } = await createPendingPaymentFixture(
+      paymentService,
+      ticketService,
+      1,
+    )
 
     await paymentService.approveTestPayment(created.payment.id)
 
@@ -49,15 +56,53 @@ describe('Payment flow', () => {
       where: { paymentId: created.payment.id },
     })
     const raffleAfter = await prisma.raffle.findUnique({ where: { id: raffle.id } })
+    const creatorBalance = await financialTransactionService.getBalance(creator.id)
 
-    expect(paymentAfter?.status).toBe('CONFIRMED')
+    expect(paymentAfter?.status).toBe('APPROVED')
     expect(ticketAfter?.status).toBe('PAID')
     expect(raffleAfter?.soldTicketsCount).toBe(1)
-    expect(transactions.map(t => t.type).sort()).toEqual([
-      'CREATOR_EARNING',
-      'PLATFORM_FEE',
-      'SALE',
-    ])
+    expect(transactions.map(t => t.type).sort()).toEqual(['COMMISSION', 'PAYMENT_RECEIVED'])
+    expect(creatorBalance).toBe(950)
+  })
+
+  it('recusa pagamento fake e mantem ticket disponivel para nova reserva', async () => {
+    const { created, ticket } = await createPendingPaymentFixture(paymentService, ticketService, 7)
+
+    await paymentService.failTestPayment(created.payment.id)
+
+    const paymentAfter = await prisma.payment.findUnique({ where: { id: created.payment.id } })
+    const ticketAfter = await prisma.ticket.findUnique({ where: { id: ticket.id } })
+    const transactions = await prisma.financialTransaction.findMany({
+      where: { paymentId: created.payment.id },
+    })
+
+    expect(paymentAfter?.status).toBe('FAILED')
+    expect(ticketAfter?.status).toBe('CANCELLED')
+    expect(transactions).toHaveLength(0)
+  })
+
+  it('processa webhook fake com idempotencia', async () => {
+    const { created, raffle, ticket } = await createPendingPaymentFixture(paymentService, ticketService, 5)
+    const event = fakeProvider.simulateApproved(created.payment.providerCheckoutSessionId)
+
+    const firstResult = await paymentService.processFakeWebhookEvent(event)
+    const secondResult = await paymentService.processFakeWebhookEvent(event)
+
+    const paymentAfter = await prisma.payment.findUnique({ where: { id: created.payment.id } })
+    const raffleAfter = await prisma.raffle.findUnique({ where: { id: raffle.id } })
+    const webhookEvents = await prisma.paymentWebhookEvent.findMany({
+      where: { providerEventId: event.eventId },
+    })
+    const transactions = await prisma.financialTransaction.findMany({
+      where: { paymentId: created.payment.id },
+    })
+
+    expect(firstResult.duplicate).toBe(false)
+    expect(secondResult.duplicate).toBe(true)
+    expect(paymentAfter?.status).toBe('APPROVED')
+    expect(raffleAfter?.soldTicketsCount).toBe(1)
+    expect(webhookEvents).toHaveLength(1)
+    expect(transactions).toHaveLength(2)
   })
 
   it('processa webhook do Stripe com idempotencia', async () => {
@@ -89,10 +134,10 @@ describe('Payment flow', () => {
 
     expect(firstResult.duplicate).toBe(false)
     expect(secondResult.duplicate).toBe(true)
-    expect(paymentAfter?.status).toBe('CONFIRMED')
+    expect(paymentAfter?.status).toBe('APPROVED')
     expect(raffleAfter?.soldTicketsCount).toBe(1)
     expect(webhookEvents).toHaveLength(1)
-    expect(transactions).toHaveLength(3)
+    expect(transactions).toHaveLength(2)
   })
 
   it('processa webhook valido com assinatura Stripe verificada pelo provider', async () => {
@@ -140,7 +185,7 @@ describe('Payment flow', () => {
     }
   })
 
-  it('marca pagamento e ticket como falhados quando checkout expira', async () => {
+  it('marca pagamento e ticket como expirados quando checkout expira', async () => {
     const { created, ticket } = await createPendingPaymentFixture(paymentService, ticketService, 3)
     const event = {
       id: 'evt_checkout_expired_test',
@@ -160,7 +205,7 @@ describe('Payment flow', () => {
     const paymentAfter = await prisma.payment.findUnique({ where: { id: created.payment.id } })
     const ticketAfter = await prisma.ticket.findUnique({ where: { id: ticket.id } })
 
-    expect(paymentAfter?.status).toBe('FAILED')
+    expect(paymentAfter?.status).toBe('EXPIRED')
     expect(ticketAfter?.status).toBe('CANCELLED')
   })
 
@@ -190,7 +235,7 @@ describe('Payment flow', () => {
     expect(ticketAfter?.status).toBe('CANCELLED')
   })
 
-  it('estorna pagamento confirmado e reverte saldo do criador', async () => {
+  it('estorna pagamento aprovado e reverte saldo do criador via ledger', async () => {
     const { created, creator, ticket } = await createPendingPaymentFixture(paymentService, ticketService, 6)
     const succeededEvent = {
       id: 'evt_payment_intent_succeeded_for_refund',
@@ -204,8 +249,8 @@ describe('Payment flow', () => {
     }
     await (paymentService as any).processStripeWebhookEvent(succeededEvent)
 
-    const creatorAfterSale = await prisma.user.findUnique({ where: { id: creator.id } })
-    expect(creatorAfterSale?.balanceCents).toBe(950)
+    const creatorAfterSale = await financialTransactionService.getBalance(creator.id)
+    expect(creatorAfterSale).toBe(950)
 
     const refundEvent = {
       id: 'evt_charge_refunded_test',
@@ -223,19 +268,18 @@ describe('Payment flow', () => {
 
     const paymentAfter = await prisma.payment.findUnique({ where: { id: created.payment.id } })
     const ticketAfter = await prisma.ticket.findUnique({ where: { id: ticket.id } })
-    const creatorAfterRefund = await prisma.user.findUnique({ where: { id: creator.id } })
+    const creatorAfterRefund = await financialTransactionService.getBalance(creator.id)
     const transactions = await prisma.financialTransaction.findMany({
       where: { paymentId: created.payment.id },
     })
 
     expect(paymentAfter?.status).toBe('REFUNDED')
     expect(ticketAfter?.status).toBe('REFUNDED')
-    expect(creatorAfterRefund?.balanceCents).toBe(0)
+    expect(creatorAfterRefund).toBe(0)
     expect(transactions.map(transaction => transaction.type).sort()).toEqual([
-      'CREATOR_EARNING',
-      'PLATFORM_FEE',
+      'COMMISSION',
+      'PAYMENT_RECEIVED',
       'REFUND',
-      'SALE',
     ])
   })
 })

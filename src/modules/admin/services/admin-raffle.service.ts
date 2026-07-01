@@ -273,7 +273,7 @@ export class AdminRaffleService {
       // Mark payments as REFUNDED when requested
       if (issueRefunds && paymentIds.length > 0) {
         await tx.payment.updateMany({
-          where: { id: { in: paymentIds }, status: PaymentStatus.CONFIRMED },
+          where: { id: { in: paymentIds }, status: PaymentStatus.APPROVED },
           data:  { status: PaymentStatus.REFUNDED },
         })
       }

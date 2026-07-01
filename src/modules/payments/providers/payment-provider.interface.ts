@@ -1,4 +1,4 @@
-export type ProviderPaymentStatus = 'pending' | 'approved' | 'failed' | 'refunded'
+export type ProviderPaymentStatus = 'pending' | 'approved' | 'failed' | 'cancelled' | 'expired' | 'refunded'
 
 export interface CreatePaymentInput {
   amountCents: number
@@ -19,7 +19,15 @@ export interface ProviderPaymentResult {
   providerPaymentId?: string | null
   status: ProviderPaymentStatus
   checkoutUrl?: string
+  qrCode?: string
   expiresAt?: Date
+}
+
+export interface FakeWebhookEventPayload {
+  eventId: string
+  eventType: 'payment.approved' | 'payment.failed' | 'payment.expired' | 'payment.cancelled'
+  checkoutSessionId: string
+  providerPaymentId?: string | null
 }
 
 export interface PaymentProvider {

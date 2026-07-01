@@ -401,7 +401,7 @@ function stopPaymentPolling() {
 async function pollPaymentStatus(ticketId) {
   try {
     const payment = await api.payments.status(ticketId)
-    if (payment?.status === 'CONFIRMED') {
+    if (payment?.status === 'APPROVED') {
       stopPaymentPolling()
       showToast('Pagamento confirmado!', 'success')
       state.selectedNumbers.clear()

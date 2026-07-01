@@ -7,6 +7,7 @@ import { TicketService } from '@/modules/tickets/services/ticket.service'
 import { PaymentService } from '@/modules/payments/services/payment.service'
 import { DrawService } from '@/modules/draws/services/draw.service'
 import { AppError } from '@/shared/errors/AppError'
+import { env } from '@/config/env'
 
 const userService = new UserService()
 const raffleService = new RaffleService()
@@ -159,6 +160,15 @@ export const paymentController = {
   },
 
   async webhook(req: Request, res: Response) {
+    if (env.PAYMENT_PROVIDER === 'fake') {
+      const payload = Buffer.isBuffer(req.body)
+        ? req.body
+        : Buffer.from(JSON.stringify(req.body ?? {}))
+      const result = await paymentService.handleWebhook(payload)
+      res.json(result)
+      return
+    }
+
     const signature = Array.isArray(req.headers['stripe-signature'])
       ? req.headers['stripe-signature'][0]
       : req.headers['stripe-signature']

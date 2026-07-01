@@ -262,7 +262,7 @@ export class AdminUserService {
 
     // Total gasto (Apenas pagamentos confirmados)
     const totalSpent = await prisma.payment.aggregate({
-      where: { userId: targetUserId, status: 'CONFIRMED' },
+      where: { userId: targetUserId, status: 'APPROVED' },
       _sum:  { amountCents: true },
     })
 

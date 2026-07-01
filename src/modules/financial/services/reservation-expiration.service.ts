@@ -34,7 +34,7 @@ export class ReservationExpirationService {
       if (pendingPaymentIds.length > 0) {
         await tx.payment.updateMany({
           where: { id: { in: pendingPaymentIds }, status: 'PENDING' },
-          data: { status: 'FAILED' },
+          data: { status: 'EXPIRED' },
         })
       }
 

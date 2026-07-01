@@ -7,12 +7,16 @@ import cors from 'cors'
 import compression from 'compression'
 import rateLimit from 'express-rate-limit'
 import { env } from '@/config/env'
+import { swaggerUiServe, swaggerUiSetup } from '@/config/swagger'
 import { router } from '@/routes'
 
 import { errorMiddleware } from '@/shared/middlewares/error.middleware'
 
 export const app = express()
 const publicPath = path.join(__dirname, '..', 'public')
+
+// Documentacao
+app.use('/api-docs', swaggerUiServe, swaggerUiSetup)
 
 // Seguranca
 app.use(helmet())

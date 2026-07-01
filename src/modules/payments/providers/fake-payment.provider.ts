@@ -2,6 +2,7 @@ import { v4 as uuid } from 'uuid'
 import { NotFoundError, PaymentError } from '@/shared/errors/AppError'
 import {
   CreatePaymentInput,
+  FakeWebhookEventPayload,
   PaymentProvider,
   ProviderPaymentResult,
   ProviderPaymentStatus,
@@ -17,7 +18,6 @@ interface FakePaymentRecord {
   status: ProviderPaymentStatus
   qrCode: string
   expiresAt: Date
-  forceFail: boolean
 }
 
 export class FakePaymentProvider implements PaymentProvider {
@@ -37,7 +37,6 @@ export class FakePaymentProvider implements PaymentProvider {
       status: 'pending',
       qrCode: buildFakePixQrCode(checkoutSessionId, input.amountCents),
       expiresAt,
-      forceFail: false,
     }
 
     this.payments.set(checkoutSessionId, record)
@@ -47,40 +46,76 @@ export class FakePaymentProvider implements PaymentProvider {
 
   async getPaymentStatus({ checkoutSessionId }: { checkoutSessionId: string }): Promise<ProviderPaymentResult> {
     const record = this.getRecord(checkoutSessionId)
+    this.syncExpiredStatus(record)
     return this.toResult(record)
   }
 
   async confirmPayment({ checkoutSessionId }: { checkoutSessionId: string }): Promise<ProviderPaymentResult> {
     const record = this.getRecord(checkoutSessionId)
+    this.syncExpiredStatus(record)
+    return this.toResult(record)
+  }
 
+  simulateApproved(checkoutSessionId: string): FakeWebhookEventPayload {
+    const record = this.getRecord(checkoutSessionId)
     if (record.status === 'approved') {
-      return this.toResult(record)
+      return this.buildWebhookEvent(record, 'payment.approved')
     }
 
-    if (record.status === 'failed' || record.forceFail) {
-      throw new PaymentError('Pagamento simulado com falha')
+    if (record.status === 'failed' || record.status === 'cancelled' || record.status === 'expired') {
+      throw new PaymentError('Pagamento simulado indisponivel para aprovacao')
     }
 
     if (record.expiresAt < new Date()) {
-      record.status = 'failed'
+      record.status = 'expired'
       throw new PaymentError('Pagamento simulado expirado')
     }
 
     record.status = 'approved'
-    return this.toResult(record)
+    return this.buildWebhookEvent(record, 'payment.approved')
   }
 
-  approveForTest(checkoutSessionId: string): ProviderPaymentResult {
+  simulateFailed(checkoutSessionId: string): FakeWebhookEventPayload {
     const record = this.getRecord(checkoutSessionId)
-    record.status = 'approved'
-    return this.toResult(record)
-  }
+    if (record.status === 'approved' || record.status === 'refunded') {
+      throw new PaymentError('Pagamento simulado ja aprovado')
+    }
 
-  failForTest(checkoutSessionId: string): ProviderPaymentResult {
-    const record = this.getRecord(checkoutSessionId)
     record.status = 'failed'
-    record.forceFail = true
-    return this.toResult(record)
+    return this.buildWebhookEvent(record, 'payment.failed')
+  }
+
+  simulateExpired(checkoutSessionId: string): FakeWebhookEventPayload {
+    const record = this.getRecord(checkoutSessionId)
+    if (record.status === 'approved' || record.status === 'refunded') {
+      throw new PaymentError('Pagamento simulado ja aprovado')
+    }
+
+    record.status = 'expired'
+    record.expiresAt = new Date(Date.now() - 1_000)
+    return this.buildWebhookEvent(record, 'payment.expired')
+  }
+
+  simulateCancelled(checkoutSessionId: string): FakeWebhookEventPayload {
+    const record = this.getRecord(checkoutSessionId)
+    if (record.status === 'approved' || record.status === 'refunded') {
+      throw new PaymentError('Pagamento simulado ja aprovado')
+    }
+
+    record.status = 'cancelled'
+    return this.buildWebhookEvent(record, 'payment.cancelled')
+  }
+
+  /** @deprecated Use simulateApproved + PaymentService.handleFakeWebhook */
+  approveForTest(checkoutSessionId: string): ProviderPaymentResult {
+    this.simulateApproved(checkoutSessionId)
+    return this.toResult(this.getRecord(checkoutSessionId))
+  }
+
+  /** @deprecated Use simulateFailed + PaymentService.handleFakeWebhook */
+  failForTest(checkoutSessionId: string): ProviderPaymentResult {
+    this.simulateFailed(checkoutSessionId)
+    return this.toResult(this.getRecord(checkoutSessionId))
   }
 
   clear(): void {
@@ -93,12 +128,31 @@ export class FakePaymentProvider implements PaymentProvider {
     return record
   }
 
+  private syncExpiredStatus(record: FakePaymentRecord): void {
+    if (record.status === 'pending' && record.expiresAt < new Date()) {
+      record.status = 'expired'
+    }
+  }
+
+  private buildWebhookEvent(
+    record: FakePaymentRecord,
+    eventType: FakeWebhookEventPayload['eventType'],
+  ): FakeWebhookEventPayload {
+    return {
+      eventId: `fake_evt_${record.checkoutSessionId}_${eventType.replace('.', '_')}_${Date.now()}`,
+      eventType,
+      checkoutSessionId: record.checkoutSessionId,
+      providerPaymentId: record.providerPaymentId,
+    }
+  }
+
   private toResult(record: FakePaymentRecord): ProviderPaymentResult {
     return {
       checkoutSessionId: record.checkoutSessionId,
       providerPaymentId: record.providerPaymentId,
       status: record.status,
       checkoutUrl: `https://checkout.local/fake/${record.checkoutSessionId}`,
+      qrCode: record.qrCode,
       expiresAt: record.expiresAt,
     }
   }

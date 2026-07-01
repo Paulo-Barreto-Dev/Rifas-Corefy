@@ -6,7 +6,10 @@ import { FinancialTransactionService } from '@/modules/financial/services/financ
 import { PaymentAuditService } from '@/modules/payments/services/payment-audit.service'
 import { getFakePaymentProvider, getPaymentProvider } from '@/modules/payments/providers/payment-provider.factory'
 import { FakePaymentProvider } from '@/modules/payments/providers/fake-payment.provider'
-import { PaymentProvider } from '@/modules/payments/providers/payment-provider.interface'
+import {
+  FakeWebhookEventPayload,
+  PaymentProvider,
+} from '@/modules/payments/providers/payment-provider.interface'
 import { StripeService } from '@/modules/payments/providers/stripe/stripe.service'
 import { logger } from '@/shared/utils/logger'
 import { env } from '@/config/env'
@@ -107,6 +110,7 @@ export class PaymentService {
       return {
         payment,
         checkoutUrl: providerResult.checkoutUrl,
+        qrCode: providerResult.qrCode,
         sessionId: providerResult.checkoutSessionId,
         expiresAt: providerResult.expiresAt,
       }
@@ -120,8 +124,9 @@ export class PaymentService {
   }
 
   async handleWebhook(payload: Buffer, signature?: string) {
-    if (env.PAYMENT_PROVIDER !== 'stripe') {
-      throw new AppError('Webhook Stripe indisponivel com o provider atual', 409, 'INVALID_PROVIDER')
+    if (env.PAYMENT_PROVIDER === 'fake') {
+      const event = this.parseFakeWebhookPayload(payload)
+      return this.handleFakeWebhook(event)
     }
 
     if (!signature) {
@@ -130,6 +135,14 @@ export class PaymentService {
 
     const event = this.getStripeService().constructWebhookEvent(payload, signature)
     return this.processStripeWebhookEvent(event)
+  }
+
+  async handleFakeWebhook(event: FakeWebhookEventPayload) {
+    if (env.PAYMENT_PROVIDER !== 'fake') {
+      throw new AppError('Webhook fake indisponivel com o provider atual', 409, 'INVALID_PROVIDER')
+    }
+
+    return this.processFakeWebhookEvent(event)
   }
 
   async finalizeApprovedPayment(paymentId: string) {
@@ -148,9 +161,11 @@ export class PaymentService {
     if (!payment) throw new NotFoundError('Pagamento')
 
     const fakeProvider = this.getFakeProvider()
-    fakeProvider.approveForTest(payment.providerCheckoutSessionId)
+    const event = fakeProvider.simulateApproved(payment.providerCheckoutSessionId)
 
-    return this.finalizeApprovedPayment(paymentId)
+    await this.processFakeWebhookEvent(event)
+
+    return prisma.payment.findUniqueOrThrow({ where: { id: paymentId } })
   }
 
   async failTestPayment(paymentId: string) {
@@ -162,9 +177,11 @@ export class PaymentService {
     if (!payment) throw new NotFoundError('Pagamento')
 
     const fakeProvider = this.getFakeProvider()
-    fakeProvider.failForTest(payment.providerCheckoutSessionId)
+    const event = fakeProvider.simulateFailed(payment.providerCheckoutSessionId)
 
-    return this.markPaymentAsFailed(paymentId, 'PAYMENT_FAILED', { source: 'fake_provider_test' })
+    await this.processFakeWebhookEvent(event)
+
+    return prisma.payment.findUniqueOrThrow({ where: { id: paymentId } })
   }
 
   async getPaymentStatus(ticketId: string, userId: string) {
@@ -181,15 +198,101 @@ export class PaymentService {
     })
 
     let currentPayment = ticket.payment
-    if (providerStatus.status === 'failed' && ticket.payment.status === 'PENDING') {
-      currentPayment = await this.markPaymentAsFailed(ticket.payment.id, 'PAYMENT_FAILED', {
-        source: 'status_reconciliation',
-      })
+
+    if (providerStatus.status === 'approved' && ticket.payment.status === 'PENDING') {
+      currentPayment = await this.finalizeApprovedPayment(ticket.payment.id)
+    } else if (
+      (providerStatus.status === 'failed' ||
+        providerStatus.status === 'expired' ||
+        providerStatus.status === 'cancelled') &&
+      ticket.payment.status === 'PENDING'
+    ) {
+      currentPayment = await this.reconcileFailedProviderStatus(ticket.payment.id, providerStatus.status)
     }
 
     return {
       ...currentPayment,
       providerStatus: providerStatus.status,
+    }
+  }
+
+  async processFakeWebhookEvent(event: FakeWebhookEventPayload) {
+    try {
+      return await prisma.$transaction(async tx => {
+        const webhookEvent = await tx.paymentWebhookEvent.create({
+          data: {
+            provider: 'fake',
+            providerEventId: event.eventId,
+            eventType: event.eventType,
+            payload: event as unknown as Prisma.InputJsonValue,
+          },
+        })
+
+        const payment = await this.findPaymentByCheckoutSession(tx, event.checkoutSessionId)
+
+        if (!payment) {
+          logger.warn('Evento fake sem pagamento local correspondente', {
+            checkoutSessionId: event.checkoutSessionId,
+            eventType: event.eventType,
+          })
+
+          return {
+            received: true,
+            duplicate: false,
+            eventId: event.eventId,
+            eventType: event.eventType,
+            paymentId: null,
+          }
+        }
+
+        await tx.paymentWebhookEvent.update({
+          where: { id: webhookEvent.id },
+          data: { paymentId: payment.id },
+        })
+
+        switch (event.eventType) {
+          case 'payment.approved':
+            await this.confirmPaymentInTransaction(tx, payment.id)
+            break
+          case 'payment.failed':
+            await this.markPaymentAsFailedInTransaction(tx, payment.id, 'PAYMENT_FAILED', {
+              source: 'fake_webhook',
+              eventType: event.eventType,
+            })
+            break
+          case 'payment.expired':
+            await this.markPaymentAsExpiredInTransaction(tx, payment.id, {
+              source: 'fake_webhook',
+              eventType: event.eventType,
+            })
+            break
+          case 'payment.cancelled':
+            await this.markPaymentAsCancelledInTransaction(tx, payment.id, {
+              source: 'fake_webhook',
+              eventType: event.eventType,
+            })
+            break
+        }
+
+        return {
+          received: true,
+          duplicate: false,
+          eventId: event.eventId,
+          eventType: event.eventType,
+          paymentId: payment.id,
+        }
+      })
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return {
+          received: true,
+          duplicate: true,
+          eventId: event.eventId,
+          eventType: event.eventType,
+        }
+      }
+
+      throw error
     }
   }
 
@@ -267,6 +370,36 @@ export class PaymentService {
     return this.stripeService ?? new StripeService()
   }
 
+  private parseFakeWebhookPayload(payload: Buffer): FakeWebhookEventPayload {
+    try {
+      const parsed = JSON.parse(payload.toString()) as FakeWebhookEventPayload
+
+      if (!parsed.eventId || !parsed.eventType || !parsed.checkoutSessionId) {
+        throw new AppError('Payload do webhook fake invalido', 400, 'INVALID_WEBHOOK_PAYLOAD')
+      }
+
+      return parsed
+    } catch (error) {
+      if (error instanceof AppError) throw error
+      throw new AppError('Payload do webhook fake invalido', 400, 'INVALID_WEBHOOK_PAYLOAD')
+    }
+  }
+
+  private async reconcileFailedProviderStatus(paymentId: string, providerStatus: string) {
+    if (providerStatus === 'expired') {
+      return this.markPaymentAsExpired(paymentId, { source: 'status_reconciliation', providerStatus })
+    }
+
+    if (providerStatus === 'cancelled') {
+      return this.markPaymentAsCancelled(paymentId, { source: 'status_reconciliation', providerStatus })
+    }
+
+    return this.markPaymentAsFailed(paymentId, 'PAYMENT_FAILED', {
+      source: 'status_reconciliation',
+      providerStatus,
+    })
+  }
+
   private async handleCheckoutSessionCompleted(
     tx: TransactionClient,
     session: unknown,
@@ -314,7 +447,7 @@ export class PaymentService {
       expiresAt: checkoutSession.expires_at ? new Date(checkoutSession.expires_at * 1000) : undefined,
     })
 
-    await this.markPaymentAsFailedInTransaction(tx, payment.id, 'CHECKOUT_EXPIRED', {
+    await this.markPaymentAsExpiredInTransaction(tx, payment.id, {
       source: 'stripe_webhook',
       checkoutSessionId: checkoutSession.id,
     })
@@ -465,8 +598,10 @@ export class PaymentService {
     })
 
     if (!current) throw new NotFoundError('Pagamento')
-    if (current.status === 'CONFIRMED' || current.status === 'REFUNDED') return current
-    if (current.status === 'FAILED') return current
+    if (current.status === 'APPROVED' || current.status === 'REFUNDED') return current
+    if (current.status === 'FAILED' || current.status === 'CANCELLED' || current.status === 'EXPIRED') {
+      return current
+    }
 
     if (current.ticket.status !== 'RESERVED') {
       throw new AppError('Cota nao esta reservada', 409, 'INVALID_STATUS')
@@ -474,7 +609,7 @@ export class PaymentService {
 
     const transitioned = await tx.payment.updateMany({
       where: { id: paymentId, status: 'PENDING' },
-      data: { status: 'CONFIRMED', confirmedAt: new Date() },
+      data: { status: 'APPROVED', confirmedAt: new Date() },
     })
 
     if (transitioned.count === 0) {
@@ -498,15 +633,14 @@ export class PaymentService {
       paymentId: current.id,
       raffleId: current.ticket.raffleId,
       creatorId: current.ticket.raffle.creatorId,
-      buyerId: current.userId,
       amountCents: current.amountCents,
     })
 
     await paymentAuditService.log(tx, {
       paymentId: current.id,
-      action: 'PAYMENT_CONFIRMED',
+      action: 'PAYMENT_APPROVED',
       before: { status: current.status, ticketStatus: current.ticket.status },
-      after: { status: 'CONFIRMED', ticketStatus: 'PAID' },
+      after: { status: 'APPROVED', ticketStatus: 'PAID' },
       metadata: {
         breakdown: this.toBreakdownJson(breakdown),
         soldTicketsCount: raffle.soldTicketsCount,
@@ -545,7 +679,7 @@ export class PaymentService {
 
     if (!current) throw new NotFoundError('Pagamento')
     if (current.status === 'FAILED') return current
-    if (current.status === 'CONFIRMED' || current.status === 'REFUNDED') return current
+    if (current.status === 'APPROVED' || current.status === 'REFUNDED') return current
 
     const transitioned = await tx.payment.updateMany({
       where: { id: paymentId, status: 'PENDING' },
@@ -576,6 +710,106 @@ export class PaymentService {
     return tx.payment.findUniqueOrThrow({ where: { id: paymentId } })
   }
 
+  private async markPaymentAsExpired(
+    paymentId: string,
+    metadata?: Prisma.InputJsonValue,
+  ) {
+    return prisma.$transaction(tx => this.markPaymentAsExpiredInTransaction(tx, paymentId, metadata))
+  }
+
+  private async markPaymentAsExpiredInTransaction(
+    tx: TransactionClient,
+    paymentId: string,
+    metadata?: Prisma.InputJsonValue,
+  ) {
+    const current = await tx.payment.findUnique({
+      where: { id: paymentId },
+      include: { ticket: true },
+    })
+
+    if (!current) throw new NotFoundError('Pagamento')
+    if (current.status === 'EXPIRED') return current
+    if (current.status === 'APPROVED' || current.status === 'REFUNDED') return current
+
+    const transitioned = await tx.payment.updateMany({
+      where: { id: paymentId, status: 'PENDING' },
+      data: { status: 'EXPIRED' },
+    })
+
+    if (transitioned.count === 0) {
+      return tx.payment.findUniqueOrThrow({ where: { id: paymentId } })
+    }
+
+    let ticketStatus = current.ticket.status
+    if (current.ticket.status === 'RESERVED') {
+      await tx.ticket.update({
+        where: { id: current.ticketId },
+        data: { status: 'CANCELLED' },
+      })
+      ticketStatus = 'CANCELLED'
+    }
+
+    await paymentAuditService.log(tx, {
+      paymentId,
+      action: 'PAYMENT_EXPIRED',
+      before: { status: current.status, ticketStatus: current.ticket.status },
+      after: { status: 'EXPIRED', ticketStatus },
+      metadata,
+    })
+
+    return tx.payment.findUniqueOrThrow({ where: { id: paymentId } })
+  }
+
+  private async markPaymentAsCancelled(
+    paymentId: string,
+    metadata?: Prisma.InputJsonValue,
+  ) {
+    return prisma.$transaction(tx => this.markPaymentAsCancelledInTransaction(tx, paymentId, metadata))
+  }
+
+  private async markPaymentAsCancelledInTransaction(
+    tx: TransactionClient,
+    paymentId: string,
+    metadata?: Prisma.InputJsonValue,
+  ) {
+    const current = await tx.payment.findUnique({
+      where: { id: paymentId },
+      include: { ticket: true },
+    })
+
+    if (!current) throw new NotFoundError('Pagamento')
+    if (current.status === 'CANCELLED') return current
+    if (current.status === 'APPROVED' || current.status === 'REFUNDED') return current
+
+    const transitioned = await tx.payment.updateMany({
+      where: { id: paymentId, status: 'PENDING' },
+      data: { status: 'CANCELLED' },
+    })
+
+    if (transitioned.count === 0) {
+      return tx.payment.findUniqueOrThrow({ where: { id: paymentId } })
+    }
+
+    let ticketStatus = current.ticket.status
+    if (current.ticket.status === 'RESERVED') {
+      await tx.ticket.update({
+        where: { id: current.ticketId },
+        data: { status: 'CANCELLED' },
+      })
+      ticketStatus = 'CANCELLED'
+    }
+
+    await paymentAuditService.log(tx, {
+      paymentId,
+      action: 'PAYMENT_CANCELLED',
+      before: { status: current.status, ticketStatus: current.ticket.status },
+      after: { status: 'CANCELLED', ticketStatus },
+      metadata,
+    })
+
+    return tx.payment.findUniqueOrThrow({ where: { id: paymentId } })
+  }
+
   private async refundPaymentInTransaction(
     tx: TransactionClient,
     paymentId: string,
@@ -588,10 +822,10 @@ export class PaymentService {
 
     if (!current) throw new NotFoundError('Pagamento')
     if (current.status === 'REFUNDED') return current
-    if (current.status !== 'CONFIRMED') return current
+    if (current.status !== 'APPROVED') return current
 
     const transitioned = await tx.payment.updateMany({
-      where: { id: paymentId, status: 'CONFIRMED' },
+      where: { id: paymentId, status: 'APPROVED' },
       data: { status: 'REFUNDED' },
     })
 
@@ -617,7 +851,6 @@ export class PaymentService {
       paymentId: current.id,
       raffleId: current.ticket.raffleId,
       creatorId: current.ticket.raffle.creatorId,
-      buyerId: current.userId,
       amountCents: current.amountCents,
     })
 
